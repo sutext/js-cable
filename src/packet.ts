@@ -61,6 +61,15 @@ export enum CloseCode {
     SerrverShutdown = 9,
     SerrverExpeled = 10,
 }
+export enum ResponseCode {
+    OK = 0,
+    NotFound = 100,
+    Forbidden = 101,
+    Unauthorized = 102,
+    InternalError = 103,
+    InvalidParams = 104,
+    BadRequst = 255,
+}
 // Packet errors
 export class PacketError extends Error {
     constructor(message: string) {
@@ -284,9 +293,9 @@ export class Request extends Packet {
 // Response packet
 export class Response extends Packet {
     private _id: bigint;
-    private _code: number;
+    private _code: ResponseCode;
     private _body: Uint8Array;
-    constructor(id: bigint = 0n, code: number = 0, data: Uint8Array = new Uint8Array()) {
+    constructor(id: bigint = 0n, code: ResponseCode = 0, data: Uint8Array = new Uint8Array()) {
         super();
         this._id = id;
         this._code = code;
@@ -298,7 +307,7 @@ export class Response extends Packet {
     get id(): bigint {
         return this._id;
     }
-    get code(): number {
+    get code(): ResponseCode {
         return this._code;
     }
     get body(): Uint8Array {
