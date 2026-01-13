@@ -4,7 +4,6 @@ import * as coder from './coder';
 export const MIN_LEN = 0;
 export const MID_LEN = 0x3ff;
 export const MAX_LEN = 0x3fffffff;
-export const MAX_UDP = MID_LEN + 2;
 // Error types
 export enum ErrorCode {
     InvalidPacket = 0,
@@ -61,14 +60,14 @@ export enum CloseCode {
     SerrverShutdown = 9,
     SerrverExpeled = 10,
 }
-export enum ResponseCode {
+export enum StatusCode {
     OK = 0,
     NotFound = 100,
-    Forbidden = 101,
-    Unauthorized = 102,
-    InternalError = 103,
-    InvalidParams = 104,
-    BadRequst = 255,
+    Unauthorized = 101,
+    InternalError = 102,
+    InvalidParams = 103,
+    Forbidden = 201,
+    BadRequest = 255,
 }
 // Packet errors
 export class PacketError extends Error {
@@ -252,9 +251,9 @@ export class Messack extends Packet {
 
 // Request packet
 export class Request extends Packet {
-    _id: bigint = 0n;
-    _method: string = '';
-    _body: Uint8Array = new Uint8Array();
+    private _id: bigint = 0n;
+    private _method: string = '';
+    private _body: Uint8Array = new Uint8Array();
     constructor(id: bigint = 0n, method: string = '', body: Uint8Array = new Uint8Array()) {
         super();
         this._id = id;
@@ -293,9 +292,9 @@ export class Request extends Packet {
 // Response packet
 export class Response extends Packet {
     private _id: bigint;
-    private _code: ResponseCode;
+    private _code: StatusCode;
     private _body: Uint8Array;
-    constructor(id: bigint = 0n, code: ResponseCode = 0, data: Uint8Array = new Uint8Array()) {
+    constructor(id: bigint = 0n, code: StatusCode = 0, data: Uint8Array = new Uint8Array()) {
         super();
         this._id = id;
         this._code = code;
@@ -307,7 +306,7 @@ export class Response extends Packet {
     get id(): bigint {
         return this._id;
     }
-    get code(): ResponseCode {
+    get code(): StatusCode {
         return this._code;
     }
     get body(): Uint8Array {
@@ -373,31 +372,24 @@ export function encode(p: Packet): Uint8Array {
 
 // Decode bytes to packet
 export function decode(bytes: Uint8Array): Packet {
-    // Read header
     if (bytes.length < 2) {
         throw PacketError.InvalidReadLen;
     }
-
-    // Read length
     const byteCount = (bytes[0] >> 2) & 0x03;
     let length = ((bytes[0] & 0x03) << 8) | bytes[1];
     let dataStart = 2;
-
     if (byteCount > 0) {
         if (bytes.length < 2 + byteCount) {
             throw PacketError.InvalidReadLen;
         }
-
         for (let i = 0; i < byteCount; i++) {
             length = (length << 8) | bytes[2 + i];
         }
         dataStart = 2 + byteCount;
     }
-
     if (bytes.length < dataStart + length) {
         throw PacketError.InvalidReadLen;
     }
-
     const data = bytes.slice(dataStart, dataStart + length);
     return unpack(bytes.slice(0, dataStart), data);
 }
@@ -409,10 +401,8 @@ function pack(p: Packet): [Uint8Array, Uint8Array] {
     if (length > MAX_LEN) {
         throw PacketError.PacketSizeTooLarge;
     }
-
     let header: Uint8Array;
     if (length > MID_LEN) {
-        // Large packet
         let bs: number[] = [];
         let len = length;
         while (len > 0) {
@@ -420,7 +410,6 @@ function pack(p: Packet): [Uint8Array, Uint8Array] {
             len >>= 8;
         }
         bs.reverse();
-
         if (bs[0] > 3) {
             header = new Uint8Array(bs.length + 1);
             for (let i = 0; i < bs.length; i++) {
@@ -433,12 +422,10 @@ function pack(p: Packet): [Uint8Array, Uint8Array] {
 
         header[0] = (p.type << 4) | ((header.length - 2) << 2) | header[0];
     } else {
-        // Small packet
         header = new Uint8Array(2);
         header[0] = (p.type << 4) | (length >> 8);
         header[1] = length & 0xff;
     }
-
     return [header, data];
 }
 
@@ -454,17 +441,14 @@ function unpack(header: Uint8Array, data: Uint8Array): Packet {
             const connack = new Connack();
             coder.decode(data, connack);
             return connack;
-
         case PacketType.MESSAGE:
             const msg = new Message();
             coder.decode(data, msg);
             return msg;
-
         case PacketType.MESSACK:
             const messack = new Messack();
             coder.decode(data, messack);
             return messack;
-
         case PacketType.REQUEST:
             const req = new Request();
             coder.decode(data, req);
@@ -473,23 +457,19 @@ function unpack(header: Uint8Array, data: Uint8Array): Packet {
             const res = new Response();
             coder.decode(data, res);
             return res;
-
         case PacketType.PING:
             const ping = new Ping();
             coder.decode(data, ping);
             return ping;
-
         case PacketType.PONG:
             const pong = new Pong();
             coder.decode(data, pong);
             return pong;
-
         case PacketType.CLOSE:
             const close = new Close(0);
             coder.decode(data, close);
             return close;
-
         default:
-            return null as any;
+            throw PacketError.UnknownPacketType;
     }
 }
