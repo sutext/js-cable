@@ -20,20 +20,18 @@ npm install @sutext/cable
 ## Basic Usage
 
 ```typescript
-import { Client, Status, Handler, Identity } from '@sutext/cable';
-import * as packet from '@sutext/cable';
-
+import { Client, Status, Handler, Identity, Message, Request, Response } from '@sutext/cable';
 // Create a handler to process events
 const handler: Handler = {
     onStatus(status: Status) {
         console.log('Connection status changed:', Status[status]);
     },
 
-    onMessage(message: packet.Message) {
+    onMessage(message: Message) {
         console.log('Received message:', message);
     },
 
-    onRequest(request: packet.Request): packet.Response | null {
+    onRequest(request: Request): Response | null {
         console.log('Received request:', request);
         // Process request and return response if needed
         return null;
@@ -53,7 +51,7 @@ const client = new Client('ws://localhost:8080/cable', {
 client.connect(new Identity('test-user', 'test-client', 'test-password'));
 
 // Send a message
-const message: packet.Message = new packet.Message(Bigint(Date.now()), new TextEncoder().encode('Hello, world!'));
+const message: Message = new Message(Bigint(Date.now()), new TextEncoder().encode('Hello, world!'));
 
 client
     .sendMessage(message)
@@ -61,7 +59,7 @@ client
     .catch((err) => console.error('Failed to send message:', err));
 
 // Send a request
-const request: packet.Request = new packet.Request(Bigint(Date.now()), 'test-request', new TextEncoder().encode('Request params'));
+const request: Request = new Request(Bigint(Date.now()), 'test-request', new TextEncoder().encode('Request params'));
 
 client
     .sendRequest(request)
