@@ -1,9 +1,17 @@
 {
-  "name": "js-cable",
+  "name": "@sutext/cable",
   "version": "1.0.0",
   "description": "javascript client of cable",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json"
+  ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "tsc",
@@ -12,10 +20,19 @@
   "keywords": [
     "cable",
     "client",
+    "javascript",
     "websocket"
   ],
-  "author": "",
-  "license": "MIT",
+  "repository": {
+      "type": "git",
+      "url": "git+ssh://git@github.com/sutext/js-cable.git"
+    },
+  "author": "supertext@icloud.com",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/sutext/js-cable/issues"
+  },
+  "homepage": "https://github.com/sutext/js-cable#readme",
   "devDependencies": {
     "typescript": "^5.3.3"
   }
