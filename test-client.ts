@@ -7,6 +7,22 @@ class TestClient implements cable.Handler {
         this.cli = new cable.Client('ws://localhost:1688/', {
             handler: this,
         });
+        this.cli.autoRetry({
+            filter: (reason) => {
+                if (reason.type === cable.ReasonType.serverClosed) {
+                    const sreason = reason as cable.ServerClosed;
+                    switch (sreason.code) {
+                        case cable.CloseCode.Normal:
+                        case cable.CloseCode.Kickout:
+                        case cable.CloseCode.AuthFailure:
+                            return true;
+                        default:
+                            return false;
+                    }
+                }
+                return false;
+            },
+        });
     }
     onStatus(status: cable.Status): void {
         if (status === cable.Status.Opened) {
@@ -26,15 +42,15 @@ class TestClient implements cable.Handler {
                 .catch((err) => console.error('Failed to send request:', err));
         }
     }
-    onMessage(message: cable.Message): void {
+    onMessage(message: cable.Message) {
         const data = new TextDecoder().decode(message.payload);
         console.log(`Received message: ${message.kind} - ${data}`);
     }
-    onRequest(request: cable.Request): null {
+    onRequest(request: cable.Request): cable.Response {
         console.log(`Received request: ${request.method}`);
-        return null;
+        return request.response(cable.StatusCode.OK, new TextEncoder().encode('Response data'));
     }
-    connect(): void {
+    connect() {
         this.cli.connect(this.identity);
     }
 }

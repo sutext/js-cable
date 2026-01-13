@@ -1,7 +1,8 @@
+import { CoderError } from './coder';
 import * as packet from './packet';
 
 // Default options
-const DEFAULT_OPTIONS = {
+const defaultOpts = {
     pingInterval: 30 * 1000, // 30 seconds
     pingTimeout: 5 * 1000, // 5 seconds
     requestTimeout: 10 * 1000, // 10 seconds
@@ -19,7 +20,7 @@ export enum Status {
 export interface Handler {
     onStatus(status: Status): void;
     onMessage(message: packet.Message): void;
-    onRequest(request: packet.Request): packet.Response | null;
+    onRequest(request: packet.Request): packet.Response;
 }
 
 // Options interface
@@ -33,17 +34,10 @@ export interface Options {
 
 // Default handler implementation
 class DefaultHandler implements Handler {
-    onStatus(_status: Status): void {
-        // Default no-op
-    }
-
-    onMessage(_message: packet.Message): void {
-        // Default no-op
-    }
-
-    onRequest(_request: packet.Request): packet.Response | null {
-        // Default no-op
-        return null;
+    onStatus(_status: Status): void {}
+    onMessage(_message: packet.Message): void {}
+    onRequest(_request: packet.Request): packet.Response {
+        throw new Error('not implemented');
     }
 }
 
@@ -52,7 +46,6 @@ export class Client {
     private _url: string;
     private _identity: packet.Identity | null = null;
     private _conn: WebSocket | null = null;
-    private _closed: boolean = false;
     private _status: Status = Status.Unknown;
     private _handler: Handler;
     private _pingInterval: number;
@@ -64,8 +57,10 @@ export class Client {
     private _pongReceived: boolean = true;
     private _requestTasks: Map<bigint, (response: packet.Response) => void> = new Map();
     private _messageTasks: Map<bigint, (msgack: packet.Messack) => void> = new Map();
+    private _retrying: boolean = false;
+    private _retrier: Retrier | null = null;
     constructor(url: string, options: Options = {}) {
-        const opts = { ...DEFAULT_OPTIONS, ...options };
+        const opts = { ...defaultOpts, ...options };
         this._url = url;
         this._handler = options.handler || new DefaultHandler();
         this._pingInterval = opts.pingInterval!;
@@ -87,31 +82,31 @@ export class Client {
     }
 
     public connect(identity: packet.Identity) {
-        if (this._closed) {
-            return;
-        }
-        this._identity = identity;
         if (this._status === Status.Opened || this._status === Status.Opening) {
             return;
         }
+        this._identity = identity;
         this.setStatus(Status.Opening);
-        this.connectWebSocket();
+        this.reconnect();
     }
 
-    public close() {
-        if (this._closed) {
+    public close(code?: packet.CloseCode) {
+        if (this._status === Status.Closed || this._status === Status.Closing) {
             return;
         }
-        this._closed = true;
         this.setStatus(Status.Closing);
-        this.closePingTimer();
-        if (this._conn) {
-            this._conn.close();
-            this._conn = null;
+        if (code) {
+            try {
+                this.sendPacket(new packet.Close(code));
+            } catch (error) {
+                console.error(error);
+            }
         }
         this.setStatus(Status.Closed);
     }
-
+    public autoRetry(opts: { limit?: number; backoff?: Backoff; filter?: RetryFilter }): void {
+        this._retrier = new Retrier(opts.limit, opts.backoff, opts.filter);
+    }
     public sendMessage(p: packet.Message): Promise<void> {
         return new Promise((resolve, reject) => {
             if (!this.isReady) {
@@ -154,30 +149,35 @@ export class Client {
         });
     }
 
-    private connectWebSocket(): void {
+    private reconnect(): void {
+        if (this._status != Status.Opening) {
+            return;
+        }
         try {
+            if (this._conn) {
+                this._conn.close();
+            }
             this._conn = new WebSocket(this._url, 'cable');
             this._conn.binaryType = 'arraybuffer';
             this._conn.onopen = () => {
                 this.onWebSocketOpen();
             };
             this._conn.onmessage = (event) => {
-                this.onWebSocketMessage(event);
+                this.onWebSocketData(event);
             };
-            this._conn.onclose = () => {
-                this.onWebSocketClose();
+            this._conn.onclose = (event) => {
+                this.retryWhen(new NetworkReason(event));
             };
-            this._conn.onerror = (error) => {
-                this.onWebSocketError(error);
+            this._conn.onerror = (event) => {
+                this.retryWhen(new NetworkReason(event));
             };
-        } catch (error) {
-            this.handleConnectionError(error as Error);
+        } catch (error: any) {
+            this.retryWhen(new NetworkReason(undefined, error));
         }
     }
 
     private onWebSocketOpen(): void {
         if (!this._identity) {
-            this.handleConnectionError(new Error('identity is null'));
             return;
         }
         try {
@@ -185,43 +185,47 @@ export class Client {
             const bytes = packet.encode(connectPacket);
             this._conn?.send(bytes);
         } catch (error: any) {
-            this.handleConnectionError(error);
+            this.retryWhen(error);
         }
     }
 
-    private onWebSocketMessage(event: MessageEvent): void {
-        const arrayBuffer = event.data as ArrayBuffer;
-        const bytes = new Uint8Array(arrayBuffer);
+    private onWebSocketData(event: MessageEvent<ArrayBuffer>): void {
+        const bytes = new Uint8Array(event.data);
         try {
-            this.handlePacket(packet.decode(bytes));
+            const p = packet.decode(bytes);
+            this.handlePacket(p);
         } catch (error) {
+            if (error instanceof packet.PacketError) {
+                this.retryWhen(new NetworkReason(undefined, error));
+            } else if (error instanceof CoderError) {
+                this.retryWhen(new NetworkReason(undefined, error));
+            }
             console.error(error);
         }
     }
-
-    private onWebSocketClose(): void {
-        this._conn = null;
-        this.setStatus(Status.Closed);
-        this.closePingTimer();
-        for (const [id, _] of this._requestTasks) {
-            this._requestTasks.delete(id);
+    private retryWhen(reason: Reason): void {
+        if (this._retrying) {
+            return;
         }
-        for (const [id, _] of this._messageTasks) {
-            this._messageTasks.delete(id);
+        if (this.status === Status.Closed || this.status === Status.Closing) {
+            return;
         }
-    }
-
-    private onWebSocketError(error: Event): void {
-        this.handleConnectionError(new Error('websocket error'));
-    }
-
-    private handleConnectionError(err: Error): void {
-        console.error('connection error:', err);
-        this.setStatus(Status.Closed);
-        if (this._conn) {
-            this._conn.close();
-            this._conn = null;
+        if (!this._retrier) {
+            this.setStatus(Status.Closed);
+            return;
         }
+        const [delay, shouldRetry] = this._retrier.shouldRetry(reason);
+        if (!shouldRetry) {
+            this.setStatus(Status.Closed);
+            return;
+        }
+        this._retrying = true;
+        this.setStatus(Status.Opening);
+        console.debug(`cable client will retry aftter ${delay}ms...`);
+        setTimeout(() => {
+            this.reconnect();
+            this._retrying = false;
+        }, delay);
     }
 
     private handlePacket(p: packet.Packet): void {
@@ -244,22 +248,22 @@ export class Client {
                 this.handleResponse(p as packet.Response);
                 break;
             case packet.PacketType.PING:
-                this.handlePing(p as packet.Ping);
+                this.sendPacket(new packet.Pong());
                 break;
             case packet.PacketType.PONG:
                 this.handlePong(p as packet.Pong);
                 break;
             case packet.PacketType.CLOSE:
-                this.handleClose(p as packet.Close);
+                this.retryWhen(new ServerClosed((p as packet.Close).code));
                 break;
             default:
-                console.error('unknown packet type:', p.type);
+                throw packet.PacketError.UnknownPacketType;
         }
     }
 
     private handleConnack(connack: packet.Connack): void {
         if (connack.code !== packet.ConnackCode.Accepted) {
-            this.handleConnectionError(new Error(`connect rejected: ${connack.code}`));
+            this.retryWhen(new ConnectFailed(connack.code));
             return;
         }
         this.setStatus(Status.Opened);
@@ -283,9 +287,7 @@ export class Client {
 
     private handleRequest(request: packet.Request): void {
         const response = this._handler.onRequest(request);
-        if (response) {
-            this.sendPacket(response);
-        }
+        this.sendPacket(response);
     }
 
     private handleResponse(response: packet.Response): void {
@@ -296,32 +298,19 @@ export class Client {
         }
     }
 
-    private handlePing(ping: packet.Ping): void {
-        this.sendPacket(new packet.Pong());
-    }
-
     private handlePong(_pong: packet.Pong): void {
-        console.log('received pong');
         this._pongReceived = true;
         if (this._pingTimeoutTimer) {
             clearTimeout(this._pingTimeoutTimer);
         }
     }
 
-    private handleClose(close: packet.Close): void {
-        console.error('received close packet:', close.code);
-        this.close();
-    }
-
     private sendPacket(p: packet.Packet): void {
         if (!this.isReady) {
             throw new Error('connection not ready');
         }
-        try {
-            const bytes = packet.encode(p);
-            this._conn?.send(bytes);
-        } catch (error) {
-            console.error(error);
+        if (this._conn) {
+            this._conn.send(packet.encode(p));
         }
     }
 
@@ -331,6 +320,27 @@ export class Client {
         }
         console.debug(`client status change: ${Status[this._status]} -> ${Status[status]}`);
         this._status = status;
+        switch (status) {
+            case Status.Opening:
+                break;
+            case Status.Opened:
+                if (this._retrier) {
+                    this._retrier.reset();
+                }
+                this.startPingTimer();
+                break;
+            case Status.Closing:
+                break;
+            case Status.Closed:
+                this.closePingTimer();
+                if (this._conn) {
+                    this._conn.close();
+                    this._conn = null;
+                }
+                this._requestTasks.clear();
+                this._messageTasks.clear();
+                break;
+        }
         this._handler.onStatus(status);
     }
 
@@ -344,11 +354,9 @@ export class Client {
             }
             this._pongReceived = false;
             this.sendPacket(new packet.Ping());
-            console.log('sending ping');
             this._pingTimeoutTimer = setTimeout(() => {
                 if (!this._pongReceived) {
-                    console.error('ping timeout, closing connection');
-                    this.close();
+                    this.retryWhen(new PingTimeout());
                 }
             }, this._pingTimeout);
         }, this._pingInterval);
@@ -363,5 +371,133 @@ export class Client {
             clearTimeout(this._pingTimeoutTimer);
             this._pingTimeoutTimer = null;
         }
+    }
+}
+export interface Backoff {
+    next(count: number): number;
+}
+export type RetryFilter = (r: Reason) => boolean;
+export class Retrier {
+    private limit: number;
+    private count: number = 0;
+    private filter: RetryFilter | null = null;
+    private backoff: Backoff;
+    constructor(limit: number = Number.MAX_SAFE_INTEGER, backoff: Backoff = ExponentialBackoff.default, filter: RetryFilter | null = null) {
+        this.limit = limit;
+        this.backoff = backoff;
+        this.filter = filter;
+    }
+    public reset(): void {
+        this.count = 0;
+    }
+    public shouldRetry(e: Reason): [number, boolean] {
+        if (this.filter && this.filter(e)) {
+            return [0, false];
+        }
+        if (this.count >= this.limit) {
+            return [0, false];
+        }
+        this.count++;
+        return [this.backoff.next(this.count) * 1000, true];
+    }
+}
+export class ExponentialBackoff implements Backoff {
+    private factor: number;
+    private jitter: number;
+    constructor(factor: number, jitter: number) {
+        this.factor = factor;
+        this.jitter = jitter;
+    }
+    public next(count: number): number {
+        const delay = Math.pow(this.factor, count - 1);
+        return delay + (Math.random() * 2 - 1) * this.jitter * delay;
+    }
+    static default = new ExponentialBackoff(2, 0.1);
+}
+export class LinearBackoff implements Backoff {
+    private factor: number;
+    private jitter: number;
+    constructor(factor: number, jitter: number) {
+        this.factor = factor;
+        this.jitter = jitter;
+    }
+    public next(count: number): number {
+        const delay = this.factor * count;
+        return delay + (Math.random() * 2 - 1) * this.jitter * delay;
+    }
+    static default = new LinearBackoff(2, 0.1);
+}
+export class RandomBackoff implements Backoff {
+    private min: number;
+    private max: number;
+    private jitter: number;
+    constructor(min: number, max: number, jitter: number) {
+        this.min = min;
+        this.max = max;
+        this.jitter = jitter;
+    }
+    public next(count: number): number {
+        const delay = this.min + Math.random() * (this.max - this.min);
+        return delay + (Math.random() * 2 - 1) * this.jitter * delay;
+    }
+    static default = new RandomBackoff(2, 5, 0.1);
+}
+export class ConstBackoff implements Backoff {
+    private delay: number;
+    constructor(delay: number) {
+        this.delay = delay;
+    }
+    public next(_count: number): number {
+        return this.delay;
+    }
+    static default = new ConstBackoff(5);
+}
+export enum ReasonType {
+    connectFailed = 0,
+    serverClosed = 1,
+    networkError = 2,
+    pingTimeout = 3,
+}
+export interface Reason {
+    get type(): ReasonType;
+}
+export class ConnectFailed implements Reason {
+    readonly ackcode: packet.ConnackCode;
+    get type(): ReasonType {
+        return ReasonType.connectFailed;
+    }
+    constructor(ackcode: packet.ConnackCode) {
+        this.ackcode = ackcode;
+    }
+}
+export class ServerClosed implements Reason {
+    readonly code: packet.CloseCode;
+    get type(): ReasonType {
+        return ReasonType.serverClosed;
+    }
+    constructor(code: packet.CloseCode) {
+        this.code = code;
+    }
+}
+export class NetworkReason implements Reason {
+    readonly error?: Error;
+    readonly event?: Event;
+    get type(): ReasonType {
+        return ReasonType.networkError;
+    }
+    constructor(event?: Event, error?: Error) {
+        this.event = event;
+        this.error = error;
+    }
+    get closeCode(): number | undefined {
+        if (this.event && this.event instanceof CloseEvent) {
+            return this.event.code;
+        }
+        return undefined;
+    }
+}
+export class PingTimeout implements Reason {
+    get type(): ReasonType {
+        return ReasonType.pingTimeout;
     }
 }
