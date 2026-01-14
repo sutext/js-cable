@@ -52,8 +52,8 @@ export class Client {
     private _pingTimeout: number;
     private _requestTimeout: number;
     private _messageTimeout: number;
-    private _pingTimer: number | null = null;
-    private _pingTimeoutTimer: number | null = null;
+    private _pingTimer: any | null = null;
+    private _pingTimeoutTimer: any | null = null;
     private _pongReceived: boolean = true;
     private _requestTasks: Map<bigint, (response: packet.Response) => void> = new Map();
     private _messageTasks: Map<bigint, (msgack: packet.Messack) => void> = new Map();

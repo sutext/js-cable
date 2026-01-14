@@ -5,6 +5,7 @@ export class CoderError extends Error {
     }
     static BufferTooShort = new CoderError('buffer too short');
     static VarintOverflow = new CoderError('varint overflow');
+    static BigIntOverflow = new CoderError('bigint overflow');
 }
 export interface Encoder {
     bytes(): Uint8Array;
@@ -50,13 +51,16 @@ class Coder implements Encoder, Decoder {
     private pos: number = 0;
     private buf: Uint8Array;
 
-    constructor(cap?: number) {
-        const capacity = cap && cap > 0 ? cap : 256;
-        this.buf = new Uint8Array(capacity);
+    constructor(capOrBytes?: number | Uint8Array) {
+        if (capOrBytes instanceof Uint8Array) {
+            this.buf = capOrBytes;
+        } else {
+            const capacity = capOrBytes && capOrBytes > 0 ? capOrBytes : 256;
+            this.buf = new Uint8Array(capacity);
+        }
     }
-
     bytes(): Uint8Array {
-        return this.buf;
+        return this.buf.slice(0, this.pos);
     }
 
     private ensureCapacity(additional: number): void {
@@ -98,15 +102,18 @@ class Coder implements Encoder, Decoder {
     }
 
     writeUInt64(i: bigint): void {
+        if (i < 0 || i > 0xffffffffffffffffn) {
+            throw CoderError.BigIntOverflow;
+        }
         this.ensureCapacity(8);
-        this.buf[this.pos++] = Number(i >> 56n) & 0xff;
-        this.buf[this.pos++] = Number(i >> 48n) & 0xff;
-        this.buf[this.pos++] = Number(i >> 40n) & 0xff;
-        this.buf[this.pos++] = Number(i >> 32n) & 0xff;
-        this.buf[this.pos++] = Number(i >> 24n) & 0xff;
-        this.buf[this.pos++] = Number(i >> 16n) & 0xff;
-        this.buf[this.pos++] = Number(i >> 8n) & 0xff;
-        this.buf[this.pos++] = Number(i) & 0xff;
+        this.buf[this.pos++] = Number((i >> 56n) & 0xffn);
+        this.buf[this.pos++] = Number((i >> 48n) & 0xffn);
+        this.buf[this.pos++] = Number((i >> 40n) & 0xffn);
+        this.buf[this.pos++] = Number((i >> 32n) & 0xffn);
+        this.buf[this.pos++] = Number((i >> 24n) & 0xffn);
+        this.buf[this.pos++] = Number((i >> 16n) & 0xffn);
+        this.buf[this.pos++] = Number((i >> 8n) & 0xffn);
+        this.buf[this.pos++] = Number(i & 0xffn);
     }
 
     writeBool(b: boolean): void {
@@ -126,10 +133,16 @@ class Coder implements Encoder, Decoder {
     }
 
     writeInt64(i: bigint): void {
+        if (i < -0x8000_0000_0000_0000n || i > 0x7fff_ffff_ffff_ffffn) {
+            throw CoderError.BigIntOverflow;
+        }
         this.writeUInt64(i & 0xffffffffffffffffn);
     }
 
     writeVarint(i: number): void {
+        if (i > Number.MAX_SAFE_INTEGER || i < 0) {
+            throw CoderError.VarintOverflow;
+        }
         this.ensureCapacity(10);
         while (i >= 0x80) {
             this.buf[this.pos++] = (i & 0x7f) | 0x80;
@@ -237,7 +250,7 @@ class Coder implements Encoder, Decoder {
     }
     readInt64(): bigint {
         const u = this.readUInt64();
-        return u;
+        return u >= 0x8000_0000_0000_0000n ? u - 0x1_0000_0000_0000_0000n : u;
     }
 
     readVarint(): number {
@@ -305,7 +318,7 @@ class Coder implements Encoder, Decoder {
     readAll(): Uint8Array {
         const l = this.buf.length;
         if (this.pos >= l) {
-            throw CoderError.BufferTooShort;
+            return new Uint8Array(0);
         }
         const p = this.buf.slice(this.pos);
         this.pos = l;
@@ -318,10 +331,7 @@ export function NewEncoder(cap?: number): Encoder {
 }
 
 export function NewDecoder(bytes: Uint8Array): Decoder {
-    const coder = new Coder();
-    coder.writeBytes(bytes);
-    coder['pos'] = 0; // Reset position for reading
-    return coder;
+    return new Coder(bytes);
 }
 export interface Encodable {
     writeTo(encoder: Encoder): void;

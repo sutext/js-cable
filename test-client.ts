@@ -32,7 +32,7 @@ class TestClient implements cable.Handler {
                 .sendMessage(testMessage)
                 .then(() => console.log('Message sent successfully'))
                 .catch((err) => console.error('Failed to send message:', err));
-            const testRequest = new cable.Request(1n, 'test-request', new TextEncoder().encode('Request params'));
+            const testRequest = new cable.Request('test-request', new TextEncoder().encode('Request params'));
             this.cli
                 .sendRequest(testRequest)
                 .then((response) => {
