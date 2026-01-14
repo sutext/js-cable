@@ -40,7 +40,15 @@ class DefaultHandler implements Handler {
         throw new Error('not implemented');
     }
 }
-
+export class CableError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'CableError';
+    }
+    static NotReady = new CableError('connection not ready');
+    static RequestTimeout = new CableError('request timeout');
+    static MessageTimeout = new CableError('message timeout');
+}
 // Client implementation
 export class Client {
     private _url: string;
@@ -55,8 +63,8 @@ export class Client {
     private _pingTimer: any | null = null;
     private _pingTimeoutTimer: any | null = null;
     private _pongReceived: boolean = true;
-    private _requestTasks: Map<bigint, (response: packet.Response) => void> = new Map();
-    private _messageTasks: Map<bigint, (msgack: packet.Messack) => void> = new Map();
+    private _requestTasks: Map<bigint, (respOrError: packet.Response | Error) => void> = new Map();
+    private _messageTasks: Map<bigint, (ackOrError: packet.Messack | Error) => void> = new Map();
     private _retrying: boolean = false;
     private _retrier: Retrier | null = null;
     constructor(url: string, options: Options = {}) {
@@ -107,20 +115,35 @@ export class Client {
     public autoRetry(opts: { limit?: number; backoff?: Backoff; filter?: RetryFilter }): void {
         this._retrier = new Retrier(opts.limit, opts.backoff, opts.filter);
     }
-    public sendMessage(p: packet.Message): Promise<void> {
+    public sendMessage(message: packet.Message): Promise<void> {
+        if (message.qos == 0) {
+            return this._sendMessage(message);
+        }
+        return this._sendMessage(message).catch((error) => {
+            if (error === CableError.MessageTimeout) {
+                return this.sendMessage(message);
+            }
+            throw error;
+        });
+    }
+    private _sendMessage(p: packet.Message): Promise<void> {
         return new Promise((resolve, reject) => {
             if (!this.isReady) {
-                reject(new Error('connection not ready'));
+                reject(CableError.NotReady);
                 return;
             }
             if (p.qos === 1) {
                 const timeout = setTimeout(() => {
                     this._requestTasks.delete(p.id);
-                    reject(new Error('msg timeout'));
+                    reject(CableError.MessageTimeout);
                 }, this._messageTimeout);
                 this._messageTasks.set(p.id, (ack) => {
                     clearTimeout(timeout);
-                    resolve();
+                    if (ack instanceof Error) {
+                        reject(ack);
+                    } else {
+                        resolve();
+                    }
                 });
                 this.sendPacket(p);
             } else {
@@ -133,17 +156,21 @@ export class Client {
     public sendRequest(p: packet.Request): Promise<packet.Response> {
         return new Promise((resolve, reject) => {
             if (!this.isReady) {
-                reject(new Error('connection not ready'));
+                reject(CableError.NotReady);
                 return;
             }
             const timeout = setTimeout(() => {
                 this._requestTasks.delete(p.id);
-                reject(new Error('request timeout'));
+                reject(CableError.RequestTimeout);
             }, this._requestTimeout);
 
             this._requestTasks.set(p.id, (response) => {
                 clearTimeout(timeout);
-                resolve(response);
+                if (response instanceof Error) {
+                    reject(response);
+                } else {
+                    resolve(response);
+                }
             });
             this.sendPacket(p);
         });
@@ -166,13 +193,13 @@ export class Client {
                 this.onWebSocketData(event);
             };
             this._conn.onclose = (event) => {
-                this.retryWhen(new NetworkReason(event));
+                this.retryWhen(new NetworkError(event));
             };
             this._conn.onerror = (event) => {
-                this.retryWhen(new NetworkReason(event));
+                this.retryWhen(new NetworkError(event));
             };
         } catch (error: any) {
-            this.retryWhen(new NetworkReason(undefined, error));
+            this.retryWhen(new NetworkError(undefined, error));
         }
     }
 
@@ -196,9 +223,9 @@ export class Client {
             this.handlePacket(p);
         } catch (error) {
             if (error instanceof packet.PacketError) {
-                this.retryWhen(new NetworkReason(undefined, error));
+                this.retryWhen(new NetworkError(undefined, error));
             } else if (error instanceof CoderError) {
-                this.retryWhen(new NetworkReason(undefined, error));
+                this.retryWhen(new NetworkError(undefined, error));
             }
             console.error(error);
         }
@@ -207,6 +234,7 @@ export class Client {
         if (this._retrying) {
             return;
         }
+        this.clearAllTasks(reason);
         if (this.status === Status.Closed || this.status === Status.Closing) {
             return;
         }
@@ -307,13 +335,22 @@ export class Client {
 
     private sendPacket(p: packet.Packet): void {
         if (!this.isReady) {
-            throw new Error('connection not ready');
+            throw CableError.NotReady;
         }
         if (this._conn) {
             this._conn.send(packet.encode(p));
         }
     }
-
+    private clearAllTasks(error: Error) {
+        this._requestTasks.forEach((callback) => {
+            callback(error);
+        });
+        this._messageTasks.forEach((callback) => {
+            callback(error);
+        });
+        this._requestTasks.clear();
+        this._messageTasks.clear();
+    }
     private setStatus(status: Status): void {
         if (this._status === status) {
             return;
@@ -458,34 +495,43 @@ export enum ReasonType {
     networkError = 2,
     pingTimeout = 3,
 }
-export interface Reason {
-    get type(): ReasonType;
+export class Reason extends Error {
+    get type(): ReasonType {
+        throw new Error('not implemented');
+    }
 }
-export class ConnectFailed implements Reason {
+
+export class ConnectFailed extends Reason {
     readonly ackcode: packet.ConnackCode;
     get type(): ReasonType {
         return ReasonType.connectFailed;
     }
     constructor(ackcode: packet.ConnackCode) {
+        super(`connect failed: ${packet.ConnackCode[ackcode]}`);
+        this.name = 'ConnectFailed';
         this.ackcode = ackcode;
     }
 }
-export class ServerClosed implements Reason {
+export class ServerClosed extends Reason {
     readonly code: packet.CloseCode;
     get type(): ReasonType {
         return ReasonType.serverClosed;
     }
     constructor(code: packet.CloseCode) {
+        super(`server closed: ${packet.CloseCode[code]}`);
+        this.name = 'ServerClosed';
         this.code = code;
     }
 }
-export class NetworkReason implements Reason {
+export class NetworkError extends Reason {
     readonly error?: Error;
     readonly event?: Event;
     get type(): ReasonType {
         return ReasonType.networkError;
     }
     constructor(event?: Event, error?: Error) {
+        super(`network error: ${error?.message},event: ${event?.type}`);
+        this.name = 'NetworkReason';
         this.event = event;
         this.error = error;
     }
@@ -496,8 +542,12 @@ export class NetworkReason implements Reason {
         return undefined;
     }
 }
-export class PingTimeout implements Reason {
+export class PingTimeout extends Reason {
     get type(): ReasonType {
         return ReasonType.pingTimeout;
+    }
+    constructor() {
+        super('ping timeout');
+        this.name = 'PingTimeout';
     }
 }
