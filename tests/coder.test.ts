@@ -1,7 +1,6 @@
 import { NewEncoder, NewDecoder } from '../src/coder';
 
 describe('Coder Encoding and Decoding', () => {
-    // 测试辅助函数：验证编码解码后是否一致
     const testTypeConsistency = <T>(
         value: T,
         encodeFn: (encoder: ReturnType<typeof NewEncoder>, value: T) => void,
@@ -14,7 +13,6 @@ describe('Coder Encoding and Decoding', () => {
         return decodeFn(decoder);
     };
 
-    // 比较两个Uint8Array是否相等
     const uint8ArraysEqual = (a: Uint8Array, b: Uint8Array): boolean => {
         if (a.length !== b.length) return false;
         for (let i = 0; i < a.length; i++) {
@@ -23,7 +21,6 @@ describe('Coder Encoding and Decoding', () => {
         return true;
     };
 
-    // 比较两个Map是否相等
     const mapsEqual = <K, V>(a: Map<K, V>, b: Map<K, V>): boolean => {
         if (a.size !== b.size) return false;
         for (const [key, value] of a) {
@@ -58,7 +55,7 @@ describe('Coder Encoding and Decoding', () => {
         });
 
         it('should encode and decode UInt32 correctly', () => {
-            const testValues = [0, 1, 65535, 65536, 2147483647]; // 使用32位有符号整数范围内的值
+            const testValues = [0, 1, 65535, 65536, 2147483647];
             for (const value of testValues) {
                 const decoded = testTypeConsistency(
                     value,
@@ -70,16 +67,7 @@ describe('Coder Encoding and Decoding', () => {
         });
 
         it('should encode and decode UInt64 correctly', () => {
-            const testValues = [
-                0n,
-                1n,
-                65535n,
-                65536n,
-                4294967295n,
-                1000000000000000n, 
-                BigInt(2 ** 63), // 添加到UInt64测试用例中，因为它是有效的无符号64位整数
-                9223372036854775807n
-            ];
+            const testValues = [0n, 1n, 65535n, 65536n, 4294967295n, 1000000000000000n, BigInt(2 ** 63), 9223372036854775807n];
             for (const value of testValues) {
                 const decoded = testTypeConsistency(
                     value,
@@ -139,15 +127,7 @@ describe('Coder Encoding and Decoding', () => {
         });
 
         it('should encode and decode Int64 correctly', () => {
-            const testValues = [
-                -9223372036854775808n, // 最小64位有符号整数
-                -3213123123213n,
-                -1n,
-                0n,
-                1n,
-                123456789n,
-                9223372036854775807n, // 最大64位有符号整数
-            ];
+            const testValues = [-9223372036854775808n, -3213123123213n, -1n, 0n, 1n, 123456789n, 9223372036854775807n];
             for (const value of testValues) {
                 const decoded = testTypeConsistency(
                     value,
@@ -279,7 +259,6 @@ describe('Coder Encoding and Decoding', () => {
         it('should encode and decode multiple different types sequentially', () => {
             const encoder = NewEncoder();
 
-            // 写入多种不同类型的数据
             encoder.writeUInt8(42);
             encoder.writeString('hello');
             encoder.writeBool(true);
@@ -290,7 +269,6 @@ describe('Coder Encoding and Decoding', () => {
             const bytes = encoder.bytes();
             const decoder = NewDecoder(bytes);
 
-            // 按顺序读取并验证
             expect(decoder.readUInt8()).toBe(42);
             expect(decoder.readString()).toBe('hello');
             expect(decoder.readBool()).toBe(true);
