@@ -4,7 +4,7 @@ class TestClient implements cable.Handler {
     identity: cable.Identity = new cable.Identity('test-user', 'test-client', 'test-password');
     cli: cable.Client;
     constructor() {
-        this.cli = new cable.Client('ws://localhost:1688/', {
+        this.cli = new cable.Client('ws://localhost:1881/', {
             handler: this,
         });
         this.cli.autoRetry({
@@ -26,15 +26,12 @@ class TestClient implements cable.Handler {
     }
     onStatus(status: cable.Status): void {
         if (status === cable.Status.Opened) {
-            const testMessage = new cable.Message(1n << 63n, new TextEncoder().encode('Hello, Cable!'));
-            testMessage.qos = cable.MessageQos.Qos1;
             this.cli
-                .sendMessage(testMessage)
+                .sendMessage({ payload: new TextEncoder().encode('Hello, world!') })
                 .then(() => console.log('Message sent successfully'))
                 .catch((err) => console.error('Failed to send message:', err));
-            const testRequest = new cable.Request('test-request', new TextEncoder().encode('Request params'));
             this.cli
-                .sendRequest(testRequest)
+                .sendRequest('test-method', new TextEncoder().encode('Request params'))
                 .then((response) => {
                     const data = new TextDecoder().decode(response.body);
                     console.log(`Request response: ${data}`);

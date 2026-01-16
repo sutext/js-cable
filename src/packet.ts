@@ -172,23 +172,23 @@ const qosMask = 0x80;
 const dupMask = 0x40;
 const kindMask = 0x3f;
 export class Message extends Packet {
-    private _id: bigint; // int64
+    private _id: number; // uint16
     public dup: boolean = false;
     public qos: MessageQos = MessageQos.Qos0;
     public kind: MessageKind = 0;
     private _payload: Uint8Array = new Uint8Array();
-    constructor(id: bigint = 0n, payload?: Uint8Array) {
+    constructor(id: number = 0, qos: MessageQos = MessageQos.Qos0, kind: MessageKind = 0, payload?: Uint8Array) {
         super();
         this._id = id;
         if (payload) {
             this._payload = payload;
         }
     }
+    get id(): number {
+        return this._id;
+    }
     get type(): PacketType {
         return PacketType.MESSAGE;
-    }
-    get id(): bigint {
-        return this._id;
     }
     get payload(): Uint8Array {
         return this._payload;
@@ -210,13 +210,13 @@ export class Message extends Packet {
         }
         flags |= this.kind;
         encoder.writeUInt8(flags);
-        encoder.writeInt64(this._id);
+        encoder.writeUInt16(this._id);
         super.writeTo(encoder);
         encoder.writeBytes(this._payload);
     }
     readFrom(decoder: coder.Decoder) {
         const flags = decoder.readUInt8();
-        const id = decoder.readInt64();
+        const id = decoder.readUInt16();
         super.readFrom(decoder);
         const payload = decoder.readAll();
         this._id = id;
@@ -229,44 +229,42 @@ export class Message extends Packet {
 
 // Messack packet
 export class Messack extends Packet {
-    private _id: bigint; //int64
-    constructor(id: bigint = 0n) {
+    private _id: number; //int64
+    constructor(id: number = 0) {
         super();
         this._id = id;
     }
     get type(): PacketType {
         return PacketType.MESSACK;
     }
-    get id(): bigint {
+    get id(): number {
         return this._id;
     }
     writeTo(encoder: coder.Encoder) {
-        encoder.writeInt64(this._id);
+        encoder.writeUInt16(this._id);
         super.writeTo(encoder);
     }
     readFrom(decoder: coder.Decoder) {
-        this._id = decoder.readInt64();
+        this._id = decoder.readUInt16();
         super.readFrom(decoder);
     }
 }
-export function randomId(): bigint {
-    return (BigInt(Math.floor(Math.random() * 0x7fff)) << 48n) | (BigInt(Date.now()) & 0xffff_ffff_ffffn);
-}
+
 // Request packet
 export class Request extends Packet {
-    private _id: bigint = 0n; //int64
-    private _method: string = '';
+    private _id: number; //uint16
+    private _method: string;
     private _body: Uint8Array = new Uint8Array();
-    constructor(method: string = '', body: Uint8Array = new Uint8Array()) {
+    constructor(id: number = 0, method: string = '', body: Uint8Array = new Uint8Array()) {
         super();
-        this._id = randomId();
+        this._id = id;
         this._method = method;
         this._body = body;
     }
     get type(): PacketType {
         return PacketType.REQUEST;
     }
-    get id(): bigint {
+    get id(): number {
         return this._id;
     }
     get method(): string {
@@ -276,13 +274,13 @@ export class Request extends Packet {
         return this._body;
     }
     writeTo(encoder: coder.Encoder) {
-        encoder.writeInt64(this._id);
+        encoder.writeUInt16(this._id);
         encoder.writeString(this._method);
         super.writeTo(encoder);
         encoder.writeBytes(this._body);
     }
     readFrom(decoder: coder.Decoder) {
-        this._id = decoder.readInt64();
+        this._id = decoder.readUInt16();
         this._method = decoder.readString();
         super.readFrom(decoder);
         this._body = decoder.readAll();
@@ -294,10 +292,10 @@ export class Request extends Packet {
 
 // Response packet
 export class Response extends Packet {
-    private _id: bigint; //int64
+    private _id: number; //uint16
     private _code: StatusCode; //uint8
     private _body: Uint8Array;
-    constructor(id: bigint = 0n, code: StatusCode = 0, data: Uint8Array = new Uint8Array()) {
+    constructor(id: number = 0, code: StatusCode = 0, data: Uint8Array = new Uint8Array()) {
         super();
         this._id = id;
         this._code = code;
@@ -306,7 +304,7 @@ export class Response extends Packet {
     get type(): PacketType {
         return PacketType.RESPONSE;
     }
-    get id(): bigint {
+    get id(): number {
         return this._id;
     }
     get code(): StatusCode {
@@ -316,13 +314,13 @@ export class Response extends Packet {
         return this._body;
     }
     writeTo(encoder: coder.Encoder) {
-        encoder.writeInt64(this._id);
+        encoder.writeUInt16(this._id);
         encoder.writeUInt8(this._code);
         super.writeTo(encoder);
         encoder.writeBytes(this._body);
     }
     readFrom(decoder: coder.Decoder) {
-        this._id = decoder.readInt64();
+        this._id = decoder.readUInt16();
         this._code = decoder.readUInt8();
         super.readFrom(decoder);
         this._body = decoder.readAll();

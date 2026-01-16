@@ -7,6 +7,7 @@ const defaultOpts = {
     pingTimeout: 5 * 1000, // 5 seconds
     requestTimeout: 10 * 1000, // 10 seconds
     messageTimeout: 10 * 1000, // 10 seconds
+    messageMaxRetry: 5,
 };
 // Connection status
 export enum Status {
@@ -29,6 +30,7 @@ export interface Options {
     pingTimeout?: number;
     requestTimeout?: number;
     messageTimeout?: number;
+    messageMaxRetry?: number;
     handler?: Handler;
 }
 
@@ -63,8 +65,11 @@ export class Client {
     private _pingTimer: any | null = null;
     private _pingTimeoutTimer: any | null = null;
     private _pongReceived: boolean = true;
-    private _requestTasks: Map<bigint, (respOrError: packet.Response | Error) => void> = new Map();
-    private _messageTasks: Map<bigint, (ackOrError: packet.Messack | Error) => void> = new Map();
+    private _requestTasks: Map<number, (respOrError: packet.Response | Error) => void> = new Map();
+    private _messageTasks: Map<number, (ackOrError: packet.Messack | Error) => void> = new Map();
+    private _messageMaxRetry: number;
+    private _messageId: number = 0;
+    private _requestId: number = 0;
     private _retrying: boolean = false;
     private _retrier: Retrier | null = null;
     constructor(url: string, options: Options = {}) {
@@ -75,6 +80,7 @@ export class Client {
         this._pingTimeout = opts.pingTimeout!;
         this._requestTimeout = opts.requestTimeout!;
         this._messageTimeout = opts.messageTimeout!;
+        this._messageMaxRetry = opts.messageMaxRetry!;
     }
 
     get id(): packet.Identity | null {
@@ -115,13 +121,24 @@ export class Client {
     public autoRetry(opts: { limit?: number; backoff?: Backoff; filter?: RetryFilter }): void {
         this._retrier = new Retrier(opts.limit, opts.backoff, opts.filter);
     }
-    public sendMessage(message: packet.Message): Promise<void> {
-        if (message.qos == 0) {
+    public sendMessage(msg: Partial<Pick<packet.Message, 'qos' | 'kind' | 'payload'>>): Promise<void> {
+        const qos = msg.qos || 0;
+        if (qos == 0) {
+            const message = new packet.Message(0, qos, msg.kind, msg.payload);
             return this._sendMessage(message);
         }
-        return this._sendMessage(message).catch((error) => {
+        const id = this._messageId++ / (2 ** 16 - 1);
+        const message = new packet.Message(id, msg.qos, msg.kind, msg.payload);
+        return this._sendMessage1(message, 0);
+    }
+    private _sendMessage1(p: packet.Message, retries: number): Promise<void> {
+        if (retries > this._messageMaxRetry) {
+            throw new Error('max retries exceeded');
+        }
+        return this._sendMessage(p).catch((error) => {
             if (error === CableError.MessageTimeout) {
-                return this.sendMessage(message);
+                p.dup = true;
+                return this._sendMessage1(p, retries + 1);
             }
             throw error;
         });
@@ -153,7 +170,9 @@ export class Client {
         });
     }
 
-    public sendRequest(p: packet.Request): Promise<packet.Response> {
+    public sendRequest(method: string, body: Uint8Array = new Uint8Array()): Promise<packet.Response> {
+        const id = this._requestId++ / (2 ** 16 - 1);
+        const p = new packet.Request(id, method, body);
         return new Promise((resolve, reject) => {
             if (!this.isReady) {
                 reject(CableError.NotReady);
