@@ -83,15 +83,13 @@ describe('Packet Encoding and Decoding', () => {
     describe('Message Packet', () => {
         it('should encode and decode correctly with QoS 0', () => {
             const payload = new TextEncoder().encode('Hello, Cable!');
-            const message = new Message(123n, payload);
-            message.qos = MessageQos.Qos0;
+            const message = new Message(123, MessageQos.Qos0, 42, payload);
             message.dup = false;
-            message.kind = 42;
             message.set(Property.Channel, 'test-channel');
 
             const decoded = testPacketConsistency(message);
             expect(decoded.type).toBe(PacketType.MESSAGE);
-            expect(decoded.id).toBe(123n);
+            expect(decoded.id).toBe(123);
             expect(uint8ArraysEqual(decoded.payload, payload)).toBe(true);
             expect(decoded.qos).toBe(MessageQos.Qos0);
             expect(decoded.dup).toBe(false);
@@ -101,14 +99,11 @@ describe('Packet Encoding and Decoding', () => {
 
         it('should encode and decode correctly with QoS 1 and dup true', () => {
             const payload = new TextEncoder().encode('QoS 1 message');
-            const message = new Message(456n, payload);
-            message.qos = MessageQos.Qos1;
+            const message = new Message(456, MessageQos.Qos1, 60, payload);
             message.dup = true;
-            message.kind = 60; // 小于kindMask(63)
-
             const decoded = testPacketConsistency(message);
             expect(decoded.type).toBe(PacketType.MESSAGE);
-            expect(decoded.id).toBe(456n);
+            expect(decoded.id).toBe(456);
             expect(uint8ArraysEqual(decoded.payload, payload)).toBe(true);
             expect(decoded.qos).toBe(MessageQos.Qos1);
             expect(decoded.dup).toBe(true);
@@ -117,8 +112,8 @@ describe('Packet Encoding and Decoding', () => {
 
         it('should encode and decode correctly with large ID', () => {
             const payload = new TextEncoder().encode('Large ID message');
-            const largeId = BigInt(2 ** 63) - 1n; // 大数值ID
-            const message = new Message(largeId, payload);
+            const largeId = 65531; // 大数值ID
+            const message = new Message(largeId, 0, 0, payload);
 
             const decoded = testPacketConsistency(message);
             expect(decoded.type).toBe(PacketType.MESSAGE);
@@ -127,8 +122,8 @@ describe('Packet Encoding and Decoding', () => {
         });
         it('should encode and decode correctly with large body', () => {
             const payload = new TextEncoder().encode('Large body message'.repeat(1000));
-            const largeId = BigInt(2 ** 63) - 1n; // 大数值ID
-            const message = new Message(largeId, payload);
+            const largeId = 65532; // 大数值ID
+            const message = new Message(largeId, 0, 0, payload);
 
             const decoded = testPacketConsistency(message);
             expect(decoded.type).toBe(PacketType.MESSAGE);
@@ -139,17 +134,17 @@ describe('Packet Encoding and Decoding', () => {
 
     describe('Messack Packet', () => {
         it('should encode and decode correctly with small ID', () => {
-            const messack = new Messack(789n);
+            const messack = new Messack(789);
             messack.set(Property.ClientID, 'client-456');
 
             const decoded = testPacketConsistency(messack);
             expect(decoded.type).toBe(PacketType.MESSACK);
-            expect(decoded.id).toBe(789n);
+            expect(decoded.id).toBe(789);
             expect(decoded.get(Property.ClientID)).toBe('client-456');
         });
 
         it('should encode and decode correctly with large ID', () => {
-            const largeId = BigInt('1000000000000000000');
+            const largeId = 2 ** 16 - 1;
             const messack = new Messack(largeId);
 
             const decoded = testPacketConsistency(messack);
@@ -161,7 +156,7 @@ describe('Packet Encoding and Decoding', () => {
     describe('Request Packet', () => {
         it('should encode and decode correctly with method and body', () => {
             const body = new TextEncoder().encode('Request body data');
-            const request = new Request('get-resources', body);
+            const request = new Request(Math.floor(Math.random() * (2 ** 16 - 1)), 'get-resources', body);
             request.set(Property.UserID, 'user-789');
             const decoded = testPacketConsistency(request);
             expect(decoded.type).toBe(PacketType.REQUEST);
@@ -172,7 +167,7 @@ describe('Packet Encoding and Decoding', () => {
         });
 
         it('should encode and decode correctly with empty body', () => {
-            const request = new Request('empty-request', new Uint8Array());
+            const request = new Request(Math.floor(Math.random() * (2 ** 16 - 1)), 'empty-request', new Uint8Array());
             const decoded = testPacketConsistency(request);
             expect(decoded.type).toBe(PacketType.REQUEST);
             expect(decoded.id).toBe(request.id);
@@ -184,7 +179,7 @@ describe('Packet Encoding and Decoding', () => {
     describe('Response Packet', () => {
         it('should encode and decode correctly with OK status', () => {
             const body = new TextEncoder().encode('Success response');
-            const response = new Response(9012n, StatusCode.OK, body);
+            const response = new Response(9012, StatusCode.OK, body);
             response.set(Property.ConnID, 'conn-456');
 
             const decoded = testPacketConsistency(response);
@@ -195,10 +190,10 @@ describe('Packet Encoding and Decoding', () => {
         });
 
         it('should encode and decode correctly with NotFound status', () => {
-            const response = new Response(3456n, StatusCode.NotFound, new Uint8Array());
+            const response = new Response(3456, StatusCode.NotFound, new Uint8Array());
             const decoded = testPacketConsistency(response);
             expect(decoded.type).toBe(PacketType.RESPONSE);
-            expect(decoded.id).toBe(3456n);
+            expect(decoded.id).toBe(3456);
             expect(decoded.code).toBe(StatusCode.NotFound);
             expect(decoded.body.length).toBe(0);
         });

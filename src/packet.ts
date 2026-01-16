@@ -172,20 +172,28 @@ const qosMask = 0x80;
 const dupMask = 0x40;
 const kindMask = 0x3f;
 export class Message extends Packet {
-    private _id: number; // uint16
     public dup: boolean = false;
-    public qos: MessageQos = MessageQos.Qos0;
-    public kind: MessageKind = 0;
+    private _id: number; // uint16
+    private _qos: MessageQos = MessageQos.Qos0;
+    private _kind: MessageKind = 0;
     private _payload: Uint8Array = new Uint8Array();
     constructor(id: number = 0, qos: MessageQos = MessageQos.Qos0, kind: MessageKind = 0, payload?: Uint8Array) {
         super();
         this._id = id;
+        this._qos = qos;
+        this._kind = kind;
         if (payload) {
             this._payload = payload;
         }
     }
     get id(): number {
         return this._id;
+    }
+    get qos(): MessageQos {
+        return this._qos;
+    }
+    get kind(): MessageKind {
+        return this._kind;
     }
     get type(): PacketType {
         return PacketType.MESSAGE;
@@ -221,8 +229,8 @@ export class Message extends Packet {
         const payload = decoder.readAll();
         this._id = id;
         this.dup = (flags & dupMask) !== 0;
-        this.qos = (flags & qosMask) >> 7;
-        this.kind = flags & kindMask;
+        this._qos = (flags & qosMask) >> 7;
+        this._kind = flags & kindMask;
         this._payload = payload;
     }
 }
