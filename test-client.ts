@@ -27,11 +27,11 @@ class TestClient implements cable.Handler {
     onStatus(status: cable.Status): void {
         if (status === cable.Status.Opened) {
             this.cli
-                .sendMessage({ payload: new TextEncoder().encode('Hello, world!') })
+                .send({ payload: new TextEncoder().encode('Hello, world!') })
                 .then(() => console.log('Message sent successfully'))
                 .catch((err) => console.error('Failed to send message:', err));
             this.cli
-                .sendRequest('test-method', new TextEncoder().encode('Request params'))
+                .request('test-method', new TextEncoder().encode('Request params'))
                 .then((response) => {
                     const data = new TextDecoder().decode(response.body);
                     console.log(`Request response: ${data}`);

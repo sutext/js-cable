@@ -103,7 +103,6 @@ export class Packet implements coder.Codable {
     get(key: Property): string | undefined {
         return this.props.get(key);
     }
-
     set(key: Property, value: string): void {
         this.props.set(key, value);
     }
@@ -177,13 +176,22 @@ export class Message extends Packet {
     private _qos: MessageQos = MessageQos.Qos0;
     private _kind: MessageKind = 0;
     private _payload: Uint8Array = new Uint8Array();
-    constructor(id: number = 0, qos: MessageQos = MessageQos.Qos0, kind: MessageKind = 0, payload?: Uint8Array) {
+    constructor(
+        id: number = 0,
+        qos: MessageQos = MessageQos.Qos0,
+        kind: MessageKind = 0,
+        payload?: Uint8Array,
+        props: Map<Property, string> | null = null,
+    ) {
         super();
         this._id = id;
         this._qos = qos;
         this._kind = kind;
         if (payload) {
             this._payload = payload;
+        }
+        if (props) {
+            this['props'] = props;
         }
     }
     get id(): number {
@@ -263,11 +271,14 @@ export class Request extends Packet {
     private _id: number; //uint16
     private _method: string;
     private _body: Uint8Array = new Uint8Array();
-    constructor(id: number = 0, method: string = '', body: Uint8Array = new Uint8Array()) {
+    constructor(id: number = 0, method: string = '', body: Uint8Array = new Uint8Array(), props: Map<Property, string> | null = null) {
         super();
         this._id = id;
         this._method = method;
         this._body = body;
+        if (props) {
+            this['props'] = props;
+        }
     }
     get type(): PacketType {
         return PacketType.REQUEST;

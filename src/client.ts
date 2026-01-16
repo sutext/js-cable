@@ -51,6 +51,12 @@ export class CableError extends Error {
     static RequestTimeout = new CableError('request timeout');
     static MessageTimeout = new CableError('message timeout');
 }
+export interface Message {
+    qos?: packet.MessageQos;
+    kind?: packet.MessageKind;
+    props?: Map<packet.Property, string>;
+    payload?: Uint8Array;
+}
 // Client implementation
 export class Client {
     private _url: string;
@@ -121,14 +127,14 @@ export class Client {
     public autoRetry(opts: { limit?: number; backoff?: Backoff; filter?: RetryFilter }): void {
         this._retrier = new Retrier(opts.limit, opts.backoff, opts.filter);
     }
-    public sendMessage(msg: Partial<Pick<packet.Message, 'qos' | 'kind' | 'payload'>>): Promise<void> {
+    public send(msg: Message): Promise<void> {
         const qos = msg.qos || 0;
         if (qos == 0) {
-            const message = new packet.Message(0, qos, msg.kind, msg.payload);
+            const message = new packet.Message(0, qos, msg.kind, msg.payload, msg.props);
             return this._sendMessage(message);
         }
         const id = this._messageId++ / (2 ** 16 - 1);
-        const message = new packet.Message(id, msg.qos, msg.kind, msg.payload);
+        const message = new packet.Message(id, msg.qos, msg.kind, msg.payload, msg.props);
         return this._sendMessage1(message, 0);
     }
     private _sendMessage1(p: packet.Message, retries: number): Promise<void> {
@@ -169,10 +175,11 @@ export class Client {
             }
         });
     }
-
-    public sendRequest(method: string, body: Uint8Array = new Uint8Array()): Promise<packet.Response> {
+    // send request and wait for response
+    // return Promise<packet.Response>
+    public request(method: string, body: Uint8Array, props: Map<packet.Property, string> | null = null): Promise<packet.Response> {
         const id = this._requestId++ / (2 ** 16 - 1);
-        const p = new packet.Request(id, method, body);
+        const p = new packet.Request(id, method, body, props);
         return new Promise((resolve, reject) => {
             if (!this.isReady) {
                 reject(CableError.NotReady);
@@ -182,13 +189,16 @@ export class Client {
                 this._requestTasks.delete(p.id);
                 reject(CableError.RequestTimeout);
             }, this._requestTimeout);
-
             this._requestTasks.set(p.id, (response) => {
                 clearTimeout(timeout);
                 if (response instanceof Error) {
                     reject(response);
-                } else {
+                    return;
+                }
+                if (response.code === packet.StatusCode.OK) {
                     resolve(response);
+                } else {
+                    reject(new Error(packet.StatusCode[response.code]));
                 }
             });
             this.sendPacket(p);
