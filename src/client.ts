@@ -258,24 +258,24 @@ export class Client {
                 reject(CableError.NotReady);
                 return;
             }
-            if (p.qos === 1) {
-                const timeout = setTimeout(() => {
-                    this._requestTasks.delete(p.id);
-                    reject(CableError.MessageTimeout);
-                }, this._messageTimeout);
-                this._messageTasks.set(p.id, (ack) => {
-                    clearTimeout(timeout);
-                    if (ack instanceof Error) {
-                        reject(ack);
-                    } else {
-                        resolve();
-                    }
-                });
-                this.sendPacket(p);
-            } else {
+            if (p.qos === packet.MessageQos.Qos0) {
                 this.sendPacket(p);
                 resolve();
+                return;
             }
+            const timeout = setTimeout(() => {
+                this._requestTasks.delete(p.id);
+                reject(CableError.MessageTimeout);
+            }, this._messageTimeout);
+            this._messageTasks.set(p.id, (ack) => {
+                clearTimeout(timeout);
+                if (ack instanceof Error) {
+                    reject(ack);
+                } else {
+                    resolve();
+                }
+            });
+            this.sendPacket(p);
         });
     }
     /**
@@ -336,7 +336,7 @@ export class Client {
                 this.retryWhen(new NetworkError(event));
             };
         } catch (error: any) {
-            this.retryWhen(new NetworkError(undefined, error));
+            this.retryWhen(new NetworkError(error));
         }
     }
 
@@ -360,9 +360,9 @@ export class Client {
             this.handlePacket(p);
         } catch (error) {
             if (error instanceof packet.PacketError) {
-                this.retryWhen(new NetworkError(undefined, error));
+                this.retryWhen(new NetworkError(error));
             } else if (error instanceof CoderError) {
-                this.retryWhen(new NetworkError(undefined, error));
+                this.retryWhen(new NetworkError(error));
             }
             console.error(error);
         }
@@ -817,11 +817,16 @@ export class NetworkError extends Reason {
      * @param event Optional network event
      * @param error Optional error object
      */
-    constructor(event?: Event, error?: Error) {
-        super(`network error: ${error?.message},event: ${event?.type}`);
-        this.name = 'NetworkReason';
-        this.event = event;
-        this.error = error;
+    constructor(eventOrError?: Event | Error) {
+        if (eventOrError instanceof Error) {
+            super(`network error: ${eventOrError.message}`);
+            this.name = 'NetworkError';
+            this.error = eventOrError;
+        } else {
+            super(`network error event: ${eventOrError}`);
+            this.name = 'NetworkError';
+            this.event = eventOrError;
+        }
     }
     /**
      * Gets the close code if available
