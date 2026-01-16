@@ -1,49 +1,208 @@
+/**
+ * CoderError represents an error that occurs during encoding or decoding
+ */
 export class CoderError extends Error {
+    /**
+     * Creates a new CoderError instance
+     * @param message Error message
+     */
     constructor(message: string) {
         super(message);
         this.name = 'CoderError';
     }
+    /**
+     * Buffer is too short to complete the operation
+     */
     static BufferTooShort = new CoderError('buffer too short');
+    /**
+     * Varint overflow during encoding/decoding
+     */
     static VarintOverflow = new CoderError('varint overflow');
+    /**
+     * BigInt value is out of range
+     */
     static BigIntOverflow = new CoderError('bigint overflow');
 }
+/**
+ * Encoder interface defines methods for encoding data
+ */
 export interface Encoder {
+    /**
+     * Gets the encoded byte array
+     * @returns The encoded byte array
+     */
     bytes(): Uint8Array;
+    /**
+     * Writes a byte array
+     * @param p The byte array to write
+     */
     writeBytes(p: Uint8Array): void;
+    /**
+     * Writes an unsigned 8-bit integer
+     * @param i The unsigned 8-bit integer to write
+     */
     writeUInt8(i: number): void;
+    /**
+     * Writes an unsigned 16-bit integer
+     * @param i The unsigned 16-bit integer to write
+     */
     writeUInt16(i: number): void;
+    /**
+     * Writes an unsigned 32-bit integer
+     * @param i The unsigned 32-bit integer to write
+     */
     writeUInt32(i: number): void;
+    /**
+     * Writes an unsigned 64-bit integer
+     * @param i The unsigned 64-bit integer to write
+     */
     writeUInt64(i: bigint): void;
+    /**
+     * Writes a boolean value
+     * @param b The boolean value to write
+     */
     writeBool(b: boolean): void;
+    /**
+     * Writes a signed 8-bit integer
+     * @param i The signed 8-bit integer to write
+     */
     writeInt8(i: number): void;
+    /**
+     * Writes a signed 16-bit integer
+     * @param i The signed 16-bit integer to write
+     */
     writeInt16(i: number): void;
+    /**
+     * Writes a signed 32-bit integer
+     * @param i The signed 32-bit integer to write
+     */
     writeInt32(i: number): void;
+    /**
+     * Writes a signed 64-bit integer
+     * @param i The signed 64-bit integer to write
+     */
     writeInt64(i: bigint): void;
+    /**
+     * Writes a Varint-encoded integer
+     * @param i The integer to write
+     */
     writeVarint(i: number): void;
+    /**
+     * Writes length-prefixed data
+     * @param data The data to write
+     */
     writeData(data: Uint8Array): void;
+    /**
+     * Writes a string
+     * @param s The string to write
+     */
     writeString(s: string): void;
+    /**
+     * Writes a string map
+     * @param m The string map to write
+     */
     writeStrMap(m: Map<string, string>): void;
+    /**
+     * Writes a string array
+     * @param ss The string array to write
+     */
     writeStrings(ss: string[]): void;
+    /**
+     * Writes a map from unsigned 8-bit integers to strings
+     * @param m The map to write
+     */
     writeUInt8Map(m: Map<number, string>): void;
 }
 
+/**
+ * Decoder interface defines methods for decoding data
+ */
 export interface Decoder {
+    /**
+     * Reads a byte array of specified length
+     * @param l Number of bytes to read
+     * @returns The read byte array
+     */
     readBytes(l: number): Uint8Array;
+    /**
+     * Reads an unsigned 8-bit integer
+     * @returns The read unsigned 8-bit integer
+     */
     readUInt8(): number;
+    /**
+     * Reads an unsigned 16-bit integer
+     * @returns The read unsigned 16-bit integer
+     */
     readUInt16(): number;
+    /**
+     * Reads an unsigned 32-bit integer
+     * @returns The read unsigned 32-bit integer
+     */
     readUInt32(): number;
+    /**
+     * Reads an unsigned 64-bit integer
+     * @returns The read unsigned 64-bit integer
+     */
     readUInt64(): bigint;
+    /**
+     * Reads a boolean value
+     * @returns The read boolean value
+     */
     readBool(): boolean;
+    /**
+     * Reads a signed 8-bit integer
+     * @returns The read signed 8-bit integer
+     */
     readInt8(): number;
+    /**
+     * Reads a signed 16-bit integer
+     * @returns The read signed 16-bit integer
+     */
     readInt16(): number;
+    /**
+     * Reads a signed 32-bit integer
+     * @returns The read signed 32-bit integer
+     */
     readInt32(): number;
+    /**
+     * Reads a signed 64-bit integer
+     * @returns The read signed 64-bit integer
+     */
     readInt64(): bigint;
+    /**
+     * Reads a Varint-encoded integer
+     * @returns The read integer
+     */
     readVarint(): number;
+    /**
+     * Reads length-prefixed data
+     * @returns The read data
+     */
     readData(): Uint8Array;
+    /**
+     * Reads a string
+     * @returns The read string
+     */
     readString(): string;
+    /**
+     * Reads a string map
+     * @returns The read string map
+     */
     readStrMap(): Map<string, string>;
+    /**
+     * Reads a string array
+     * @returns The read string array
+     */
     readStrings(): string[];
+    /**
+     * Reads a map from unsigned 8-bit integers to strings
+     * @returns The read map
+     */
     readUInt8Map(): Map<number, string>;
+    /**
+     * Reads all remaining bytes
+     * @returns The read byte array
+     */
     readAll(): Uint8Array;
 }
 
@@ -326,26 +485,67 @@ class Coder implements Encoder, Decoder {
     }
 }
 
+/**
+ * Creates a new Encoder instance
+ * @param cap Optional initial capacity for the encoder buffer
+ * @returns A new Encoder instance
+ */
 export function NewEncoder(cap?: number): Encoder {
     return new Coder(cap);
 }
 
+/**
+ * Creates a new Decoder instance
+ * @param bytes The byte array to decode
+ * @returns A new Decoder instance
+ */
 export function NewDecoder(bytes: Uint8Array): Decoder {
     return new Coder(bytes);
 }
+
+/**
+ * Encodable interface defines objects that can be encoded to bytes
+ */
 export interface Encodable {
+    /**
+     * Writes the object to an encoder
+     * @param encoder The encoder to write to
+     */
     writeTo(encoder: Encoder): void;
 }
+
+/**
+ * Decodable interface defines objects that can be decoded from bytes
+ */
 export interface Decodable {
+    /**
+     * Reads the object from a decoder
+     * @param decoder The decoder to read from
+     */
     readFrom(decoder: Decoder): void;
 }
+
+/**
+ * Codable is a type that combines Encodable and Decodable interfaces
+ */
 export type Codable = Encodable & Decodable;
 
+/**
+ * Encodes an encodable object to bytes
+ * @param ec The encodable object to encode
+ * @returns The encoded byte array
+ */
 export function encode(ec: Encodable): Uint8Array {
     const encoder = NewEncoder();
     ec.writeTo(encoder);
     return encoder.bytes();
 }
+
+/**
+ * Decodes bytes into a decodable object
+ * @param bytes The byte array to decode
+ * @param dc The decodable object to decode into
+ */
 export function decode(bytes: Uint8Array, dc: Decodable) {
     dc.readFrom(NewDecoder(bytes));
 }

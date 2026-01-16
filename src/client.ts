@@ -9,28 +9,81 @@ const defaultOpts = {
     messageTimeout: 10 * 1000, // 10 seconds
     messageMaxRetry: 5,
 };
-// Connection status
+/**
+ * Connection status enum
+ */
 export enum Status {
+    /**
+     * Connection status is unknown
+     */
     Unknown = 0,
+    /**
+     * Connection is being established
+     */
     Opening = 1,
+    /**
+     * Connection is established and ready
+     */
     Opened = 2,
+    /**
+     * Connection is closing
+     */
     Closing = 3,
+    /**
+     * Connection is closed
+     */
     Closed = 4,
 }
-// Handler interface
+
+/**
+ * Handler interface for client events
+ */
 export interface Handler {
+    /**
+     * Called when connection status changes
+     * @param status New connection status
+     */
     onStatus(status: Status): void;
+    /**
+     * Called when a message is received
+     * @param message Received message
+     */
     onMessage(message: packet.Message): void;
+    /**
+     * Called when a request is received
+     * @param request Received request
+     * @returns Response to send back
+     */
     onRequest(request: packet.Request): packet.Response;
 }
 
-// Options interface
+/**
+ * Client options interface
+ */
 export interface Options {
+    /**
+     * Ping interval in milliseconds
+     */
     pingInterval?: number;
+    /**
+     * Ping timeout in milliseconds
+     */
     pingTimeout?: number;
+    /**
+     * Request timeout in milliseconds
+     */
     requestTimeout?: number;
+    /**
+     * Message timeout in milliseconds
+     */
     messageTimeout?: number;
+    /**
+     * Maximum number of message retries
+     */
     messageMaxRetry?: number;
+    /**
+     * Event handler for client events
+     */
     handler?: Handler;
 }
 
@@ -42,22 +95,36 @@ class DefaultHandler implements Handler {
         throw new Error('not implemented');
     }
 }
+
+/**
+ * CableError represents an error that occurs during cable operations
+ */
 export class CableError extends Error {
+    /**
+     * Creates a new CableError instance
+     * @param message Error message
+     */
     constructor(message: string) {
         super(message);
         this.name = 'CableError';
     }
+    /**
+     * Connection is not ready
+     */
     static NotReady = new CableError('connection not ready');
+    /**
+     * Request timed out
+     */
     static RequestTimeout = new CableError('request timeout');
+    /**
+     * Message timed out
+     */
     static MessageTimeout = new CableError('message timeout');
 }
-export interface Message {
-    qos?: packet.MessageQos;
-    kind?: packet.MessageKind;
-    props?: Map<packet.Property, string>;
-    payload?: Uint8Array;
-}
-// Client implementation
+
+/**
+ * Client class for cable connection management
+ */
 export class Client {
     private _url: string;
     private _identity: packet.Identity | null = null;
@@ -78,6 +145,11 @@ export class Client {
     private _requestId: number = 0;
     private _retrying: boolean = false;
     private _retrier: Retrier | null = null;
+    /**
+     * Creates a new Client instance
+     * @param url WebSocket server URL
+     * @param options Client options
+     */
     constructor(url: string, options: Options = {}) {
         const opts = { ...defaultOpts, ...options };
         this._url = url;
@@ -89,18 +161,31 @@ export class Client {
         this._messageMaxRetry = opts.messageMaxRetry!;
     }
 
+    /**
+     * Gets the client identity
+     */
     get id(): packet.Identity | null {
         return this._identity;
     }
 
+    /**
+     * Gets the current connection status
+     */
     get status(): Status {
         return this._status;
     }
 
+    /**
+     * Checks if the connection is ready
+     */
     get isReady(): boolean {
         return this._status === Status.Opened;
     }
 
+    /**
+     * Connects to the cable server
+     * @param identity Client identity information
+     */
     public connect(identity: packet.Identity) {
         if (this._status === Status.Opened || this._status === Status.Opening) {
             return;
@@ -110,6 +195,10 @@ export class Client {
         this.reconnect();
     }
 
+    /**
+     * Closes the connection
+     * @param code Optional close code
+     */
     public close(code?: packet.CloseCode) {
         if (this._status === Status.Closed || this._status === Status.Closing) {
             return;
@@ -124,10 +213,24 @@ export class Client {
         }
         this.setStatus(Status.Closed);
     }
+    /**
+     * Configures automatic reconnection
+     * @param opts Retry options
+     */
     public autoRetry(opts: { limit?: number; backoff?: Backoff; filter?: RetryFilter }): void {
         this._retrier = new Retrier(opts.limit, opts.backoff, opts.filter);
     }
-    public send(msg: Message): Promise<void> {
+    /**
+     * Sends a message to the server
+     * @param msg Message to send
+     * @returns Promise that resolves when the message is sent (or acknowledged for QoS 1)
+     */
+    public send(msg: {
+        qos?: packet.MessageQos;
+        kind?: packet.MessageKind;
+        props?: Map<packet.Property, string>;
+        payload?: Uint8Array;
+    }): Promise<void> {
         const qos = msg.qos || 0;
         if (qos == 0) {
             const message = new packet.Message(0, qos, msg.kind, msg.payload, msg.props);
@@ -175,8 +278,13 @@ export class Client {
             }
         });
     }
-    // send request and wait for response
-    // return Promise<packet.Response>
+    /**
+     * Sends a request to the server and waits for a response
+     * @param method Request method
+     * @param body Request body
+     * @param props Request properties
+     * @returns Promise that resolves with the response
+     */
     public request(method: string, body: Uint8Array, props: Map<packet.Property, string> | null = null): Promise<packet.Response> {
         const id = this._requestId++ / (2 ** 16 - 1);
         const p = new packet.Request(id, method, body, props);
@@ -439,23 +547,55 @@ export class Client {
         }
     }
 }
+/**
+ * Backoff interface for defining retry delay strategies
+ */
 export interface Backoff {
+    /**
+     * Calculates the next delay for retries
+     * @param count Current retry count
+     * @returns Delay in seconds
+     */
     next(count: number): number;
 }
+
+/**
+ * RetryFilter is a function that determines if a retry should be attempted
+ * @param r Reason for the retry attempt
+ * @returns True if retry should be attempted, false otherwise
+ */
 export type RetryFilter = (r: Reason) => boolean;
+
+/**
+ * Retrier manages retry logic with configurable backoff strategies
+ */
 export class Retrier {
     private limit: number;
     private count: number = 0;
     private filter: RetryFilter | null = null;
     private backoff: Backoff;
+    /**
+     * Creates a new Retrier instance
+     * @param limit Maximum number of retry attempts
+     * @param backoff Backoff strategy to use
+     * @param filter Filter function to determine if retry should be attempted
+     */
     constructor(limit: number = Number.MAX_SAFE_INTEGER, backoff: Backoff = ExponentialBackoff.default, filter: RetryFilter | null = null) {
         this.limit = limit;
         this.backoff = backoff;
         this.filter = filter;
     }
+    /**
+     * Resets the retry count
+     */
     public reset(): void {
         this.count = 0;
     }
+    /**
+     * Determines if a retry should be attempted and calculates the delay
+     * @param e Reason for the retry attempt
+     * @returns Tuple of [delay in milliseconds, shouldRetry boolean]
+     */
     public shouldRetry(e: Reason): [number, boolean] {
         if (this.filter && this.filter(e)) {
             return [0, false];
@@ -467,103 +607,225 @@ export class Retrier {
         return [this.backoff.next(this.count) * 1000, true];
     }
 }
+/**
+ * ExponentialBackoff implements an exponential backoff strategy
+ */
 export class ExponentialBackoff implements Backoff {
     private factor: number;
     private jitter: number;
+    /**
+     * Creates a new ExponentialBackoff instance
+     * @param factor Exponential factor
+     * @param jitter Jitter factor (0-1)
+     */
     constructor(factor: number, jitter: number) {
         this.factor = factor;
         this.jitter = jitter;
     }
+    /**
+     * Calculates the next delay using exponential backoff
+     * @param count Current retry count
+     * @returns Delay in seconds
+     */
     public next(count: number): number {
         const delay = Math.pow(this.factor, count - 1);
         return delay + (Math.random() * 2 - 1) * this.jitter * delay;
     }
+    /**
+     * Default exponential backoff configuration (factor=2, jitter=0.1)
+     */
     static default = new ExponentialBackoff(2, 0.1);
 }
+/**
+ * LinearBackoff implements a linear backoff strategy
+ */
 export class LinearBackoff implements Backoff {
     private factor: number;
     private jitter: number;
+    /**
+     * Creates a new LinearBackoff instance
+     * @param factor Linear factor
+     * @param jitter Jitter factor (0-1)
+     */
     constructor(factor: number, jitter: number) {
         this.factor = factor;
         this.jitter = jitter;
     }
+    /**
+     * Calculates the next delay using linear backoff
+     * @param count Current retry count
+     * @returns Delay in seconds
+     */
     public next(count: number): number {
         const delay = this.factor * count;
         return delay + (Math.random() * 2 - 1) * this.jitter * delay;
     }
+    /**
+     * Default linear backoff configuration (factor=2, jitter=0.1)
+     */
     static default = new LinearBackoff(2, 0.1);
 }
+/**
+ * RandomBackoff implements a random backoff strategy
+ */
 export class RandomBackoff implements Backoff {
     private min: number;
     private max: number;
     private jitter: number;
+    /**
+     * Creates a new RandomBackoff instance
+     * @param min Minimum delay in seconds
+     * @param max Maximum delay in seconds
+     * @param jitter Jitter factor (0-1)
+     */
     constructor(min: number, max: number, jitter: number) {
         this.min = min;
         this.max = max;
         this.jitter = jitter;
     }
+    /**
+     * Calculates the next delay using random backoff
+     * @param count Current retry count
+     * @returns Delay in seconds
+     */
     public next(count: number): number {
         const delay = this.min + Math.random() * (this.max - this.min);
         return delay + (Math.random() * 2 - 1) * this.jitter * delay;
     }
+    /**
+     * Default random backoff configuration (min=2, max=5, jitter=0.1)
+     */
     static default = new RandomBackoff(2, 5, 0.1);
 }
+/**
+ * ConstBackoff implements a constant backoff strategy
+ */
 export class ConstBackoff implements Backoff {
     private delay: number;
+    /**
+     * Creates a new ConstBackoff instance
+     * @param delay Constant delay in seconds
+     */
     constructor(delay: number) {
         this.delay = delay;
     }
+    /**
+     * Returns the constant delay
+     * @param _count Current retry count (ignored for constant backoff)
+     * @returns Constant delay in seconds
+     */
     public next(_count: number): number {
         return this.delay;
     }
+    /**
+     * Default constant backoff configuration (delay=5 seconds)
+     */
     static default = new ConstBackoff(5);
 }
+/**
+ * ReasonType enumerates the possible reasons for connection failures
+ */
 export enum ReasonType {
+    /**
+     * Connection failed during handshake
+     */
     connectFailed = 0,
+    /**
+     * Server closed the connection
+     */
     serverClosed = 1,
+    /**
+     * Network error occurred
+     */
     networkError = 2,
+    /**
+     * Ping timeout occurred
+     */
     pingTimeout = 3,
 }
+
+/**
+ * Reason is the base class for connection failure reasons
+ */
 export class Reason extends Error {
+    /**
+     * Gets the reason type
+     */
     get type(): ReasonType {
         throw new Error('not implemented');
     }
 }
 
+/**
+ * ConnectFailed reason for failed connection attempts
+ */
 export class ConnectFailed extends Reason {
     readonly ackcode: packet.ConnackCode;
+    /**
+     * Gets the reason type
+     */
     get type(): ReasonType {
         return ReasonType.connectFailed;
     }
+    /**
+     * Creates a new ConnectFailed instance
+     * @param ackcode Connection acknowledgment code
+     */
     constructor(ackcode: packet.ConnackCode) {
         super(`connect failed: ${packet.ConnackCode[ackcode]}`);
         this.name = 'ConnectFailed';
         this.ackcode = ackcode;
     }
 }
+
+/**
+ * ServerClosed reason when server closes the connection
+ */
 export class ServerClosed extends Reason {
     readonly code: packet.CloseCode;
+    /**
+     * Gets the reason type
+     */
     get type(): ReasonType {
         return ReasonType.serverClosed;
     }
+    /**
+     * Creates a new ServerClosed instance
+     * @param code Close code from server
+     */
     constructor(code: packet.CloseCode) {
         super(`server closed: ${packet.CloseCode[code]}`);
         this.name = 'ServerClosed';
         this.code = code;
     }
 }
+
+/**
+ * NetworkError reason for network-related failures
+ */
 export class NetworkError extends Reason {
     readonly error?: Error;
     readonly event?: Event;
+    /**
+     * Gets the reason type
+     */
     get type(): ReasonType {
         return ReasonType.networkError;
     }
+    /**
+     * Creates a new NetworkError instance
+     * @param event Optional network event
+     * @param error Optional error object
+     */
     constructor(event?: Event, error?: Error) {
         super(`network error: ${error?.message},event: ${event?.type}`);
         this.name = 'NetworkReason';
         this.event = event;
         this.error = error;
     }
+    /**
+     * Gets the close code if available
+     */
     get closeCode(): number | undefined {
         if (this.event && this.event instanceof CloseEvent) {
             return this.event.code;
@@ -571,10 +833,20 @@ export class NetworkError extends Reason {
         return undefined;
     }
 }
+
+/**
+ * PingTimeout reason when ping response is not received in time
+ */
 export class PingTimeout extends Reason {
+    /**
+     * Gets the reason type
+     */
     get type(): ReasonType {
         return ReasonType.pingTimeout;
     }
+    /**
+     * Creates a new PingTimeout instance
+     */
     constructor() {
         super('ping timeout');
         this.name = 'PingTimeout';

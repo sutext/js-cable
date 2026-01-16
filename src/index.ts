@@ -1,5 +1,5 @@
 // Export types
-export * from "./packet";
+export * from './packet';
 
 // Export client
-export * from "./client";
+export * from './client';
